@@ -19,6 +19,9 @@
 
 using namespace std;
 
+random_device seed_gen;
+default_random_engine engine(seed_gen());
+
 void ParticleFilter::init(double x, double y, double theta, double std[]) {
 	// TODO: Set the number of particles. Initialize all particles to first position (based on estimates of 
 	//   x, y, theta and their uncertainties from GPS) and all weights to 1. 
@@ -29,8 +32,6 @@ void ParticleFilter::init(double x, double y, double theta, double std[]) {
 	is_initialized = true;
 
 	// Create gaussian distribution for x, y and theta.
-	random_device seed_gen;
-	default_random_engine engine(seed_gen());
 	normal_distribution<double> dist_x(x, std[0]), 
 															dist_y(y, std[1]), 
 															dist_theta(theta, std[2]);
@@ -56,9 +57,6 @@ void ParticleFilter::prediction(double delta_t, double std_pos[], double velocit
 	// NOTE: When adding noise you may find std::normal_distribution and std::default_random_engine useful.
 	//  http://en.cppreference.com/w/cpp/numeric/random/normal_distribution
 	//  http://www.cplusplus.com/reference/random/default_random_engine/
-
-	random_device seed_gen;
-	default_random_engine engine(seed_gen());
 
 	// Use bicycle model for prediction
 	for (int i = 0; i < num_particles; ++i) {
@@ -204,9 +202,6 @@ void ParticleFilter::resample() {
 	for (int i = 0; i < weights.size(); ++i) {
 		weights[i] = particles[i].weight;
 	}
-
-	random_device seed_gen;
-	default_random_engine engine(seed_gen());
 
 	discrete_distribution<> dist(weights.begin(), weights.end());
 
