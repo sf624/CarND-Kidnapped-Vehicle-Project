@@ -62,7 +62,7 @@ void ParticleFilter::prediction(double delta_t, double std_pos[], double velocit
 
 	// Use bicycle model for prediction
 	for (int i = 0; i < num_particles; ++i) {
-		if (abs(yaw_rate) <= 0) {
+		if (abs(yaw_rate) <= 1e-3) {
 			particles[i].x += velocity * delta_t * cos(particles[i].theta);
 			particles[i].y += velocity * delta_t * sin(particles[i].theta);
 			particles[i].theta += yaw_rate * delta_t;
