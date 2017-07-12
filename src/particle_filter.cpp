@@ -25,11 +25,12 @@ void ParticleFilter::init(double x, double y, double theta, double std[]) {
 	// Add random Gaussian noise to each particle.
 	// NOTE: Consult particle_filter.h for more information about this method (and others in this file).
 
-	num_particles = 100;
+	num_particles = 10;
 	is_initialized = true;
 
 	// Create gaussian distribution for x, y and theta.
-	default_random_engine gen;
+	random_device seed_gen;
+	default_random_engine engine(seed_gen());
 	normal_distribution<double> dist_x(x, std[0]), 
 															dist_y(y, std[1]), 
 															dist_theta(theta, std[2]);
@@ -38,13 +39,15 @@ void ParticleFilter::init(double x, double y, double theta, double std[]) {
 	for (int i = 0; i < num_particles; ++i) {
 		Particle particle;
 		particle.id = i;
-		particle.x = dist_x(gen);
-		particle.y = dist_y(gen);
-		particle.theta = dist_theta(gen);
+		particle.x = dist_x(engine);
+		particle.y = dist_y(engine);
+		particle.theta = dist_theta(engine);
 		particle.weight = 1;
 
 		particles.push_back(particle);
 		weights.push_back(particle.weight);
+
+		// cout << i << ", " << particle.x << endl;
 	}
 }
 
@@ -54,12 +57,15 @@ void ParticleFilter::prediction(double delta_t, double std_pos[], double velocit
 	//  http://en.cppreference.com/w/cpp/numeric/random/normal_distribution
 	//  http://www.cplusplus.com/reference/random/default_random_engine/
 
+	random_device seed_gen;
+	default_random_engine engine(seed_gen());
+
 	// Use bicycle model for prediction
 	for (int i = 0; i < num_particles; ++i) {
-		if (abs(yaw_rate) <= 0.0001) {
+		if (abs(yaw_rate) <= 0) {
 			particles[i].x += velocity * delta_t * cos(particles[i].theta);
 			particles[i].y += velocity * delta_t * sin(particles[i].theta);
-			// particles[i].theta += yaw_rate * delta_t;
+			particles[i].theta += yaw_rate * delta_t;
 		}
 		else {
 			particles[i].x += velocity / yaw_rate*(sin(particles[i].theta + yaw_rate*delta_t) - sin(particles[i].theta));
@@ -68,14 +74,16 @@ void ParticleFilter::prediction(double delta_t, double std_pos[], double velocit
 		}
 
 		// Add gaussian noise
-		default_random_engine gen;
-		normal_distribution<double> dist_x(particles[i].x, std_pos[0]*0.001),
-																dist_y(particles[i].y, std_pos[1]*0.001),
-																dist_theta(particles[i].theta, std_pos[2]*0.001);
+#if 1
+		normal_distribution<double> dist_x(particles[i].x, std_pos[0]),
+																dist_y(particles[i].y, std_pos[1]),
+																dist_theta(particles[i].theta, std_pos[2]);
 
-		particles[i].x = dist_x(gen);
-		particles[i].y = dist_y(gen);
-		particles[i].theta = dist_theta(gen);
+		particles[i].x = dist_x(engine);
+		particles[i].y = dist_y(engine);
+		particles[i].theta = dist_theta(engine);
+#endif
+		// cout << i << ", " << particles[i].y << endl;
 	}
 }
 
@@ -115,6 +123,8 @@ void ParticleFilter::updateWeights(double sensor_range, double std_landmark[],
 	//   3.33
 	//   http://planning.cs.uiuc.edu/node99.html
 
+	double weight_sum = 0;
+
 	for (int i=0; i<num_particles; ++i) {
 		double x = particles[i].x;
 		double y = particles[i].y;
@@ -129,7 +139,7 @@ void ParticleFilter::updateWeights(double sensor_range, double std_landmark[],
 
 			LandmarkObs landmark;
 			landmark.x = cos(-theta) * (m_x - x) - sin(-theta) * (m_y - y);
-			landmark.y = sin(-theta) * (m_x - x) + sin(-theta) * (m_y - y);
+			landmark.y = sin(-theta) * (m_x - x) + cos(-theta) * (m_y - y);
 			landmark.id = map_landmarks.landmark_list[j].id_i;
 			predicted.push_back(landmark);
 		}
@@ -137,8 +147,22 @@ void ParticleFilter::updateWeights(double sensor_range, double std_landmark[],
 		// Associate observation with map_landmark (estimated in vehicle coordinate).
 		dataAssociation(predicted, observations);
 
+		std::vector<int> associations;
+		std::vector<double> sense_x;
+		std::vector<double> sense_y;
+		// Associate particle with each observation.
+		for (int j = 0; j < observations.size(); ++j) {
+			double o_x = observations[j].x;
+			double o_y = observations[j].y;
+
+			sense_x.push_back(cos(theta) * o_x - sin(theta) * o_y + x);
+			sense_y.push_back(sin(theta) * o_x + cos(theta) * o_y + y);
+			associations.push_back(observations[j].id);
+		}
+		particles[i] = SetAssociations(particles[i], associations, sense_x, sense_y);
+
 		// Calculate weight using multi-variate Gaussian probability.
-		particles[i].weight = 1;
+		particles[i].weight = 1.0;
 		for (int j = 0; j < observations.size(); ++j) {
 			double sig_x2 = std_landmark[0]*std_landmark[0];
 			double sig_y2 = std_landmark[1]*std_landmark[1];
@@ -147,16 +171,28 @@ void ParticleFilter::updateWeights(double sensor_range, double std_landmark[],
 			// Search associated landmark and calculate difference.
 			for (int k = 0; k < predicted.size(); ++k) {
 				if (observations[j].id == predicted[k].id) {
-					double dx = observations[j].x - predicted[k].x;
-					double dy = observations[j].y - predicted[k].y;
+					dx = observations[j].x - predicted[k].x;
+					dy = observations[j].y - predicted[k].y;
 					break;
+				}
+				else if (k == predicted.size() - 1) {
+					cout << i << " " << j << " Association not found!" << endl;
 				}
 			}
 
 			particles[i].weight *= exp(-0.5 * (1.0/sig_x2*dx*dx + 1.0/sig_y2*dy*dy))
-														/ sqrt(2.0*M_PI*sig_x2*sig_y2);
+														/ sqrt(pow(2.0*M_PI,observations.size())*sig_x2*sig_y2);
 		}
+
+		// cout << i << ", " << particles[i].weight << endl;
+
+		weight_sum += particles[i].weight;
 	}
+
+	for (int i = 0; i < num_particles; ++i) {
+		particles[i].weight /= weight_sum;
+	}
+
 
 }
 
@@ -170,11 +206,15 @@ void ParticleFilter::resample() {
 	}
 
 	random_device seed_gen;
-	mt19937 engine(seed_gen());
+	default_random_engine engine(seed_gen());
 
-	discrete_distribution<int> dist(weights.begin(), weights.end());
+	discrete_distribution<> dist(weights.begin(), weights.end());
 
-	std::vector<Particle> old_particles = particles;
+	// Copy current particles
+	std::vector<Particle> old_particles;
+	copy(particles.begin(), particles.end(), back_inserter(old_particles));
+
+	// Resample according to weights
 	for (int i = 0; i < particles.size(); ++i) {
 		particles[i] = old_particles[dist(engine)];
 	}
